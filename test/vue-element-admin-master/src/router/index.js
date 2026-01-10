@@ -14,6 +14,8 @@ import studentRouter from './modules/student'
 import assignmentRouter from './modules/assignment'
 import analysisRouter from './modules/analysis' // <-- 导入
 import submissionRouter from './modules/submission'
+import aiRouter from './modules/ai'
+
 /**
  * 注意：子菜单只会在 route children.length >= 1 时出现
  * 详情见: https://panjiachen.github.io/vue-element-teacher-site/zh/guide/essentials/router-and-nav.html
@@ -147,7 +149,7 @@ export const asyncRoutes = [
     meta: {
       title: '教师菜单',
       icon: 'lock',
-      roles: ['teacher', 'admin'] // 可见角色
+      roles: ['admin'] // 可见角色
     },
     children: [
       {
@@ -188,7 +190,7 @@ export const asyncRoutes = [
         path: 'index',
         component: () => import('@/views/icons/index'),
         name: 'Icons',
-        meta: { title: '图标', icon: 'icon', noCache: true }
+        meta: { title: '图标', icon: 'icon', noCache: true, roles: [] }
       }
     ]
   },
@@ -200,91 +202,54 @@ export const asyncRoutes = [
   studentRouter,
   analysisRouter, // <-- 注册
   submissionRouter,
+  aiRouter,
 
   {
-    path: '/example',
+    path: '/example', // (强烈推荐) 将 /example 改为 /course
     component: Layout,
     redirect: '/example/list',
-    name: 'CourseManagement', // (推荐) 修改 name 以符合新功能
+    name: 'CourseManagement',
     meta: {
-      title: '课程管理', // 1. 修改顶级菜单标题
-      icon: 'education', // 2. 修改顶级菜单图标
-      roles: ['teacher', 'admin']
+      title: '课程中心', // 1. 将标题改为更中性的“课程中心”
+      icon: 'education',
+      roles: ['teacher', 'student'] // 2. 允许学生也看到这个顶级菜单
     },
     children: [
-
+    // --- 教师专属路由 ---
+      {
+        path: 'list',
+        component: () => import('@/views/example/list'),
+        name: 'TeacherCourseList', // 3. 给教师列表页一个唯一的 name
+        meta: { title: '我的教学', roles: ['teacher'] } // 4. 设为只有教师可见
+      },
       {
         path: 'create',
         component: () => import('@/views/example/create'),
-        name: 'CreateCourse', // 3. 修改 name
-        meta: { title: '创建新课程', icon: 'edit' } // 4. 修改子菜单标题
+        name: 'CreateCourse',
+        meta: { title: '创建新课程', roles: ['teacher'] } // 4. 设为只有教师可见
       },
       {
         path: 'edit/:id(\\d+)',
         component: () => import('@/views/example/edit'),
-        name: 'EditCourse', // 5. 修改 name
-        meta: { title: '编辑课程', noCache: true, activeMenu: '/example/list' }, // 6. 修改面包屑/标签页标题
+        name: 'EditCourse',
+        meta: { title: '编辑课程', noCache: true, activeMenu: '/course/list', roles: ['teacher'] },
         hidden: true
       },
-      {
-        path: 'list',
-        component: () => import('@/views/example/list'),
-        name: 'CourseList', // 7. 修改 name
-        meta: { title: '课程列表', icon: 'list' } // 8. 修改子菜单标题
-      }
-    ]
-  },
-  // {
-  //   path: '/assignment',
-  //   component: Layout,
-  //   redirect: '/assignment/list',
-  //   name: 'Work',
-  //   meta: {
-  //     title: '作业',
-  //     icon: 'edit',
-  //     roles: ['teacher', 'admin']
-  //
-  //   },
-  //   children: [
-  //     {
-  //       path: ':id(\\d+)/submissions', // 匹配 /assignment/123/submissions 这样的路径
-  //       component: () => import('@/views/assignment/submissionList'), // 指向我们将要创建的新页面文件
-  //       name: 'SubmissionList',
-  //       meta: { title: '作业提交列表', activeMenu: '/assignment/list' }, // activeMenu 确保侧边栏高亮在"作业管理"
-  //       hidden: true // 在侧边栏菜单中隐藏
-  //     },
-  //     {
-  //       path: 'create',
-  //       component: () => import('@/views/assignment/create'),
-  //       name: 'CreateArticle',
-  //       meta: { title: '创建作业', icon: 'edit' }
-  //     },
-  //     {
-  //       path: 'edit/:id(\\d+)',
-  //       component: () => import('@/views/assignment/edit'),
-  //       name: 'EditArticle',
-  //       meta: { title: '编辑作业', noCache: true, activeMenu: '/assignment/list' },
-  //       hidden: true
-  //     },
-  //     {
-  //       path: 'list',
-  //       component: () => import('@/views/assignment/list'),
-  //       name: 'ArticleList',
-  //       meta: { title: '作业管理', icon: 'list' }
-  //     }
-  //   ]
-  // },
 
-  {
-    path: '/tab',
-    component: Layout,
-    children: [
+      // --- ↓↓↓ 为学生新增的路由 ↓↓↓ ---
       {
-        path: 'index',
-        component: () => import('@/views/tab/index'),
-        name: 'Tab',
-        meta: { title: '提示词管理', icon: 'tab', roles: ['teacher', 'admin'] }
+        path: 'select',
+        component: () => import('@/views/course/select'), // 指向我们新创建的选课页面
+        name: 'CourseSelection',
+        meta: { title: '选课广场', roles: ['student'] } // 5. 设为只有学生可见
+      },
+      {
+        path: 'my-courses',
+        component: () => import('@/views/example/list'), // 6. 复用现有的 list.vue 页面
+        name: 'MyCourses',
+        meta: { title: '我的课程', roles: ['student'] } // 5. 设为只有学生可见
       }
+    // --- ↑↑↑ 新增结束 ↑↑↑ ---
     ]
   },
 

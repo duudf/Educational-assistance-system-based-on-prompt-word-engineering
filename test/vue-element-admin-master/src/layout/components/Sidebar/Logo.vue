@@ -1,12 +1,16 @@
 <template>
   <div class="sidebar-logo-container" :class="{'collapse':collapse}">
     <transition name="sidebarLogoFade">
+      <!--
+        删除了 v-if="collapse" 和 v-else 的判断，
+        因为无论是否折叠，我们都只显示标题。
+      -->
       <router-link v-if="collapse" key="collapse" class="sidebar-logo-link" to="/">
-        <img v-if="logo" :src="logo" class="sidebar-logo">
-        <h1 v-else class="sidebar-title">{{ title }} </h1>
+        <!-- 折叠时只显示标题的第一个字或缩写 -->
+        <h1 class="sidebar-title">{{ title.charAt(0) }} </h1>
       </router-link>
       <router-link v-else key="expand" class="sidebar-logo-link" to="/">
-        <img v-if="logo" :src="logo" class="sidebar-logo">
+        <!-- 展开时显示完整标题 -->
         <h1 class="sidebar-title">{{ title }} </h1>
       </router-link>
     </transition>
@@ -24,14 +28,15 @@ export default {
   },
   data() {
     return {
-      title: '基于提示词工程的教辅系统',
-      // logo: 'https://wpimg.wallstcn.com/69a1c46c-eb1c-4b46-8bd4-e9e686ef5251.png'
+      title: '基于提示词工程的教辅系统'
+      // logo 属性已完全删除
     }
   }
 }
 </script>
 
 <style lang="scss" scoped>
+/* 样式部分保持不变，删除了不再需要的 .sidebar-logo 样式 */
 .sidebarLogoFade-enter-active {
   transition: opacity 1.5s;
 }
@@ -54,13 +59,6 @@ export default {
     height: 100%;
     width: 100%;
 
-    & .sidebar-logo {
-      width: 32px;
-      height: 32px;
-      vertical-align: middle;
-      margin-right: 12px;
-    }
-
     & .sidebar-title {
       display: inline-block;
       margin: 0;
@@ -73,9 +71,10 @@ export default {
     }
   }
 
+  /* 折叠时，标题居中 */
   &.collapse {
-    .sidebar-logo {
-      margin-right: 0px;
+    .sidebar-title {
+      margin: 0;
     }
   }
 }

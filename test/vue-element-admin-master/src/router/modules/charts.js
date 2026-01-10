@@ -9,7 +9,8 @@ const chartsRouter = {
   name: 'Charts',
   meta: {
     title: '图表',
-    icon: 'chart'
+    icon: 'chart',
+    roles: [  ]
   },
   children: [
     {

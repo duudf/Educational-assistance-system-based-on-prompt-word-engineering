@@ -1,46 +1,56 @@
 <template>
   <el-row :gutter="40" class="panel-group">
-    <!-- 我的课程 面板 -->
-    <el-col :xs="12" :sm="12" :lg="8" class="card-panel-col">
+
+    <!-- 1. 我的课程 (lg由8改为6) -->
+    <el-col :xs="12" :sm="12" :lg="6" class="card-panel-col">
       <div class="card-panel" @click="handlePanelClick('my-courses')">
         <div class="card-panel-icon-wrapper icon-course">
           <svg-icon icon-class="education" class-name="card-panel-icon" />
         </div>
         <div class="card-panel-description">
-          <div class="card-panel-text">
-            我的课程
-          </div>
+          <div class="card-panel-text">我的课程</div>
           <count-to :start-val="0" :end-val="statsData.courseCount" :duration="2600" class="card-panel-num" />
         </div>
       </div>
     </el-col>
 
-    <!-- 待完成作业 面板 -->
-    <el-col :xs="12" :sm="12" :lg="8" class="card-panel-col">
+    <!-- 2. 待完成作业 (lg由8改为6) -->
+    <el-col :xs="12" :sm="12" :lg="6" class="card-panel-col">
       <div class="card-panel" @click="handlePanelClick('pending-assignments')">
         <div class="card-panel-icon-wrapper icon-pending">
           <svg-icon icon-class="list" class-name="card-panel-icon" />
         </div>
         <div class="card-panel-description">
-          <div class="card-panel-text">
-            待完成作业
-          </div>
+          <div class="card-panel-text">待完成作业</div>
           <count-to :start-val="0" :end-val="statsData.pendingCount" :duration="3000" class="card-panel-num" />
         </div>
       </div>
     </el-col>
 
-    <!-- 已提交作业 面板 -->
-    <el-col :xs="12" :sm="12" :lg="8" class="card-panel-col">
+    <!-- 3. 已提交作业 (lg由8改为6) -->
+    <el-col :xs="12" :sm="12" :lg="6" class="card-panel-col">
       <div class="card-panel" @click="handlePanelClick('submitted-assignments')">
         <div class="card-panel-icon-wrapper icon-submitted">
           <svg-icon icon-class="skill" class-name="card-panel-icon" />
         </div>
         <div class="card-panel-description">
-          <div class="card-panel-text">
-            已提交作业
-          </div>
+          <div class="card-panel-text">已提交作业</div>
           <count-to :start-val="0" :end-val="statsData.submittedCount" :duration="3200" class="card-panel-num" />
+        </div>
+      </div>
+    </el-col>
+
+    <!-- 4. 【新增】AI 练习 (新增卡片) -->
+    <el-col :xs="12" :sm="12" :lg="6" class="card-panel-col">
+      <div class="card-panel" @click="handlePanelClick('ai-practices')">
+        <div class="card-panel-icon-wrapper icon-ai">
+          <!-- 找个图标，比如 form 或 edit -->
+          <svg-icon icon-class="form" class-name="card-panel-icon" />
+        </div>
+        <div class="card-panel-description">
+          <div class="card-panel-text">AI 练习次数</div>
+          <!-- 绑定新字段 aiPracticeCount -->
+          <count-to :start-val="0" :end-val="statsData.aiPracticeCount" :duration="3600" class="card-panel-num" />
         </div>
       </div>
     </el-col>
@@ -50,10 +60,11 @@
 
 <script>
 import CountTo from 'vue-count-to'
-import { getDashboardData } from '@/api/dashboard' // 复用同一个API
+// import { getDashboardData } from '@/api/dashboard' // 暂时注释原API，防止路径不对
+import request from '@/utils/request' // 直接引入request工具，确保能连上Python
 
 export default {
-  name: 'StudentPanelGroup', // 给学生版组件一个不同的名字
+  name: 'StudentPanelGroup',
   components: {
     CountTo
   },
@@ -62,7 +73,8 @@ export default {
       statsData: {
         courseCount: 0,
         pendingCount: 0,
-        submittedCount: 0
+        submittedCount: 0,
+        aiPracticeCount: 0 // 新增字段
       }
     }
   },
@@ -71,20 +83,24 @@ export default {
   },
   methods: {
     fetchData() {
-      getDashboardData().then(response => {
-        const data = response.data;
-        // 使用后端为学生角色返回的数据
+      // 直接请求后端的 Python 接口，解决连不上的问题
+      request({
+        url: '/ai/dashboard/analysis',
+        method: 'get'
+      }).then(response => {
+        const data = response.data.card_data; // 注意这里取 card_data
+
         this.statsData = {
           courseCount: data.courseCount,
           pendingCount: data.pendingCount,
-          submittedCount: data.submittedCount
+          submittedCount: data.submittedCount,
+          aiPracticeCount: data.total_practices // 把后端返回的AI数据赋值过来
         };
       }).catch(err => {
-        console.error("在学生面板中获取数据失败:", err);
+        console.error("获取面板数据失败:", err);
       });
     },
     handlePanelClick(type) {
-      // 触发事件，方便父组件进行页面跳转等操作
       this.$emit('panel-click', type)
     }
   }
@@ -92,7 +108,6 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-/* 样式大部分可以复用，只修改图标颜色部分 */
 .panel-group {
   margin-top: 18px;
 
@@ -115,28 +130,17 @@ export default {
       .card-panel-icon-wrapper {
         color: #fff;
       }
-      .icon-course {
-        background: #40c9c6;
-      }
-      .icon-pending {
-        background: #f4516c;
-      }
-      .icon-submitted {
-        background: #36a3f7;
-      }
+      .icon-course { background: #40c9c6; }
+      .icon-pending { background: #f4516c; }
+      .icon-submitted { background: #36a3f7; }
+      .icon-ai { background: #8e44ad; } /* 新增悬停颜色 */
     }
 
-    .icon-course {
-      color: #40c9c6;
-    }
-    .icon-pending {
-      color: #f4516c;
-    }
-    .icon-submitted {
-      color: #36a3f7;
-    }
+    .icon-course { color: #40c9c6; }
+    .icon-pending { color: #f4516c; }
+    .icon-submitted { color: #36a3f7; }
+    .icon-ai { color: #8e44ad; } /* 新增图标颜色 */
 
-    /* 以下是通用样式 */
     .card-panel-icon-wrapper {
       float: left;
       margin: 14px 0 0 14px;

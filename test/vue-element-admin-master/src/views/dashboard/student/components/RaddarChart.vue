@@ -4,30 +4,26 @@
 
 <script>
 import echarts from 'echarts'
-require('echarts/theme/macarons') // echarts theme
+require('echarts/theme/macarons')
 import resize from './mixins/resize'
-
-const animationDuration = 3000
 
 export default {
   mixins: [resize],
   props: {
-    className: {
-      type: String,
-      default: 'chart'
-    },
-    width: {
-      type: String,
-      default: '100%'
-    },
-    height: {
-      type: String,
-      default: '300px'
-    }
+    className: { type: String, default: 'chart' },
+    width: { type: String, default: '100%' },
+    height: { type: String, default: '300px' },
+    chartData: { type: Array, default: () => [] }
   },
   data() {
-    return {
-      chart: null
+    return { chart: null }
+  },
+  watch: {
+    chartData: {
+      deep: true,
+      handler(val) {
+        this.setOptions(val)
+      }
     }
   },
   mounted() {
@@ -35,79 +31,55 @@ export default {
       this.initChart()
     })
   },
-  beforeDestroy() {
-    if (!this.chart) {
-      return
-    }
-    this.chart.dispose()
-    this.chart = null
-  },
   methods: {
     initChart() {
       this.chart = echarts.init(this.$el, 'macarons')
-
+      this.setOptions(this.chartData)
+    },
+    setOptions(data) {
+      if (!this.chart || !data || data.length === 0) return
       this.chart.setOption({
-        tooltip: {
-          trigger: 'axis',
-          axisPointer: { // 坐标轴指示器，坐标轴触发有效
-            type: 'shadow' // 默认为直线，可选为：'line' | 'shadow'
-          }
-        },
-        radar: {
-          radius: '66%',
-          center: ['50%', '42%'],
-          splitNumber: 8,
-          splitArea: {
-            areaStyle: {
-              color: 'rgba(127,95,132,.3)',
-              opacity: 1,
-              shadowBlur: 45,
-              shadowColor: 'rgba(0,0,0,.5)',
-              shadowOffsetX: 0,
-              shadowOffsetY: 15
-            }
-          },
-          indicator: [
-            { name: 'Sales', max: 10000 },
-            { name: 'Administration', max: 20000 },
-            { name: 'Information Technology', max: 20000 },
-            { name: 'Customer Support', max: 20000 },
-            { name: 'Development', max: 20000 },
-            { name: 'Marketing', max: 20000 }
-          ]
-        },
-        legend: {
+        // --- 完全同步你提供的标题样式 ---
+        title: {
+          text: '个人综合能力画像',
           left: 'center',
-          bottom: '10',
-          data: ['Allocated Budget', 'Expected Spending', 'Actual Spending']
+          textStyle: { fontSize: 14 }
+        },
+        // ----------------------------
+        tooltip: { trigger: 'item' },
+        radar: {
+          radius: '50%', // 缩小图表半径，确保文字指标有足够的显示空间
+          center: ['50%', '55%'], // 中心点稍微下移，避开左上角的标题
+          splitNumber: 5,
+          indicator: [
+            { name: '任务完成率', max: 100 },
+            { name: 'AI评分', max: 100 },
+            { name: '学习活跃度', max: 100 },
+            { name: '课程覆盖', max: 100 },
+            { name: '收藏偏好', max: 100 }
+          ],
+          name: {
+            textStyle: { color: '#999' }
+          }
         },
         series: [{
           type: 'radar',
-          symbolSize: 0,
+          symbol: 'circle',
+          symbolSize: 4,
+          // 中间填充颜色
           areaStyle: {
             normal: {
-              shadowBlur: 13,
-              shadowColor: 'rgba(0,0,0,.2)',
-              shadowOffsetX: 0,
-              shadowOffsetY: 10,
-              opacity: 1
+              color: 'rgba(90, 177, 239, 0.5)',
+              opacity: 0.6
             }
           },
-          data: [
-            {
-              value: [5000, 7000, 12000, 11000, 15000, 14000],
-              name: 'Allocated Budget'
-            },
-            {
-              value: [4000, 9000, 15000, 15000, 13000, 11000],
-              name: 'Expected Spending'
-            },
-            {
-              value: [5500, 11000, 12000, 15000, 12000, 12000],
-              name: 'Actual Spending'
-            }
-          ],
-          animationDuration: animationDuration
+          itemStyle: { normal: { color: '#5ab1ef' }},
+          lineStyle: { normal: { width: 2 }},
+          data: [{
+            value: data,
+            name: '综合评分'
+          }],
+          animationDuration: 2000
         }]
       })
     }

@@ -105,7 +105,7 @@ export default {
               duration: 2000
             })
             this.loading = false
-            this.$router.push('/course/list') // 操作成功后跳转到课程列表页
+            this.$router.push('/example/list') // 操作成功后跳转到课程列表页
           }).catch(() => {
             this.loading = false
           })

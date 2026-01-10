@@ -17,10 +17,10 @@
         <!-- 全屏 -->
         <screenfull id="screenfull" class="right-menu-item hover-effect" />
 
-        <!-- 字体大小切换 -->
-        <el-tooltip content="全局字号" effect="dark" placement="bottom">
-          <size-select id="size-select" class="right-menu-item hover-effect" />
-        </el-tooltip>
+<!--        &lt;!&ndash; 字体大小切换 &ndash;&gt;-->
+<!--        <el-tooltip content="全局字号" effect="dark" placement="bottom">-->
+<!--          <size-select id="size-select" class="right-menu-item hover-effect" />-->
+<!--        </el-tooltip>-->
 
       </template>
 

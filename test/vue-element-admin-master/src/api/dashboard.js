@@ -1,10 +1,20 @@
 // src/api/dashboard.js
-import request from '@/utils/request' // 项目通用的axios封装，vue项目标配
 
-// 获取看板统计数据，和后端接口地址完全对应
+import request from '@/utils/request'
+
+// 这是您文件里已有的函数，我们保留它
 export function getDashboardData() {
   return request({
-    url: '/dashboard/data', // 后端接口路径，完整地址是 baseURL + /dashboard/data
-    method: 'GET' // 后端是GET请求，必须对应
+    url: '/dashboard/data',
+    method: 'GET'
   })
 }
+
+// --- ↓↓↓ [新增] 把我们为图表新写的 API 函数添加到这个文件里 ↓↓↓ ---
+export function fetchTeacherRoleStats() {
+  return request({
+    url: '/ai/teacher/roles/daily-stats', // 这是我们新创建的后端接口
+    method: 'get'
+  })
+}
+// --- ↑↑↑ 新增结束 ↑↑↑ ---

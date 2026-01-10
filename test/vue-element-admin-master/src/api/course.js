@@ -9,7 +9,13 @@ export function fetchCourseList(query) {
     params: query
   })
 }
-
+// --- ↓↓↓ [新增] 删除课程的请求函数 ↓↓↓ ---
+export function deleteCourse(id) {
+  return request({
+    url: `/courses/${id}`,
+    method: 'delete'
+  })
+}
 // --- ↓↓↓ 在这里添加缺失的函数 ↓↓↓ ---
 // 获取教师自己的课程列表（用于下拉菜单）
 export function fetchCourseOptions() {
@@ -42,6 +48,14 @@ export function updateCourse(id, data) {
   return request({
     url: `/courses/${id}`,
     method: 'put',
+    data
+  })
+}
+// 学生选课/退课
+export function enrollCourse(data) {
+  return request({
+    url: '/courses/enroll',
+    method: 'post',
     data
   })
 }

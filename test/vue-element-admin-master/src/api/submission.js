@@ -27,3 +27,17 @@ export function gradeSubmission(submissionId, data) {
     data
   })
 }
+// --- ↓↓↓ 新增：获取学生作业提交详情（包含作业内容）↓↓↓ ---
+export function fetchStudentSubmissionDetail(assignmentId) {
+  return request({
+    url: `/student/assignments/${assignmentId}/submission-detail`,
+    method: 'get'
+  })
+}
+export function postStudentSubmission(assignmentId, data) {
+  return request({
+    url: `/student/assignments/${assignmentId}/submit`,
+    method: 'post',
+    data
+  })
+}

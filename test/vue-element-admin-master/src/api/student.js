@@ -8,3 +8,10 @@ export function fetchStudentList(query) {
     params: query
   })
 }
+// --- ↓↓↓ 新增：获取学生详情 ↓↓↓ ---
+export function fetchStudentProfile(studentId) {
+  return request({
+    url: `/students/${studentId}/profile`,
+    method: 'get'
+  })
+}

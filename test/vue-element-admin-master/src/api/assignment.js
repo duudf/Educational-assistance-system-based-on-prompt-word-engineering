@@ -36,3 +36,18 @@ export function updateAssignment(id, data) {
     data
   })
 }
+
+// --- ↓↓↓ 新增：获取学生个人作业列表 ↓↓↓ ---
+export function fetchStudentAssignments(query) {
+  return request({
+    url: '/student/assignments',
+    method: 'get',
+    params: query
+  })
+}
+export function deleteAssignment(id) {
+  return request({
+    url: `/assignments/${id}`,
+    method: 'delete'
+  })
+}

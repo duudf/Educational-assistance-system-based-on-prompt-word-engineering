@@ -48,14 +48,7 @@ class Course(db.Model):
                                lazy='dynamic')
 
 
-class Assignment(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    title = db.Column(db.String(128), nullable=False)
-    content = db.Column(db.Text)
-    due_date = db.Column(db.DateTime)
 
-    # 关联到所属的课程 (外键)
-    course_id = db.Column(db.Integer, db.ForeignKey('course.id'))
 
 
 class Prompt(db.Model):
@@ -80,7 +73,7 @@ class Submission(db.Model):
 
     # 关联到对应的作业
     assignment_id = db.Column(db.Integer, db.ForeignKey('assignment.id'))
-    assignment = db.relationship('Assignment', backref='submissions')
+    # assignment = db.relationship('Assignment', backref='submissions')
 
 
 # --- ↓↓↓ 在文件底部添加新模型 ↓↓↓ ---
@@ -95,3 +88,185 @@ class AnalysisReport(db.Model):
 
     # 记录最后更新时间
     last_updated = db.Column(db.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+# models.py
+class PracticeRecord(db.Model):
+    """AI 出题练习记录"""
+    id = db.Column(db.Integer, primary_key=True)
+
+    student_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    student = db.relationship('User', backref='practice_records')
+
+    # 存储完整的题目 JSON 数据
+    quiz_data = db.Column(JSON, nullable=False)
+
+    # 学生的答案
+    user_answer = db.Column(db.Text)
+
+    # AI 的评分 (0-100)
+    ai_grade = db.Column(db.Integer)
+
+    # AI 的评语
+    ai_feedback = db.Column(db.Text)
+
+    # 练习时间
+    practice_date = db.Column(db.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+class FavoriteQuiz(db.Model):
+    """学生收藏的题目"""
+    id = db.Column(db.Integer, primary_key=True)
+    # 关联到学生
+    student_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    student = db.relationship('User', backref='favorite_quizzes')
+
+    # 直接存储题目的 JSON 数据
+    quiz_data = db.Column(JSON, nullable=False)
+    add_date = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+
+# 1. 新增：提示词模板表 (对应你截图里的“默认助手”、“作业助手”等)
+class PromptTemplate(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(64), nullable=False)  # 例如：'简答题-关键词评分法'
+    description = db.Column(db.String(256))  # 例如：'根据关键词命中情况给分'
+    # 模板核心内容，里面会有占位符 {criteria}
+    template_content = db.Column(db.Text, nullable=False)
+    is_system = db.Column(db.Boolean, default=False)  # 是否为系统预设
+
+
+# class Assignment(db.Model):
+#     id = db.Column(db.Integer, primary_key=True)
+#     title = db.Column(db.String(128), nullable=False)
+#     content = db.Column(db.Text)
+#     due_date = db.Column(db.DateTime)
+#     submissions = db.relationship('Submission', backref='assignment', cascade="all, delete-orphan")
+#     # 关联到所属的课程 (外键)
+#     course_id = db.Column(db.Integer, db.ForeignKey('course.id'))
+
+# 2. 修改：作业表，增加评分标准字段
+class Assignment(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(128), nullable=False)
+    content = db.Column(db.Text)  # 作业题目
+    due_date = db.Column(db.DateTime)
+    course_id = db.Column(db.Integer, db.ForeignKey('course.id'))
+
+    # --- ↓↓↓ 新增字段 ↓↓↓ ---
+    # 老师针对这道题写的具体得分点 (例如："提到TCP得2分...")
+    grading_criteria = db.Column(db.Text)
+
+    submissions = db.relationship('Submission', backref='assignment', cascade="all, delete-orphan")
+
+
+
+class GradingRole(db.Model):
+    """AI 评分角色表"""
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(64), nullable=False)  # 角色名称，如 "严厉教授"
+    description = db.Column(db.String(256))  # 简短描述，给学生看
+
+    # 这里存放该角色的完整提示词配置（包含得分点逻辑、语气、格式要求）
+    # 这就是你说的“一个单独的文本”
+    prompt_content = db.Column(db.Text, nullable=False)
+
+    is_system = db.Column(db.Boolean, default=False)  # True=系统默认，False=教师创建
+
+    # 如果是教师创建的，关联到教师ID
+    creator_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    creator = db.relationship('User', backref='created_roles')
+
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'content': self.prompt_content,
+            'is_system': self.is_system,
+            'creator': self.creator.username if self.creator else "系统内置",
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M')
+        }
+
+def to_dict_list(self):
+    return {
+        'id': self.id,
+        'role_name': self.role_name,
+        'content': self.short_intro or self.prompt_template[:50] + "...", # 预览内容
+        'teacher_name': self.teacher.username if self.teacher else "系统内置", # 判断是否为系统创建
+        'importance': 5 if not self.teacher_id else 4, # 系统角色默认5星，教师4星
+        'status': self.status,
+        'category_name': self.category,
+        'is_system': True if not self.teacher_id else False # 增加一个标识位
+    }
+
+
+# backend/models.py
+# from exts import db
+from datetime import datetime
+
+
+# 这里是之前其他的模型 (User, Course 等)，保持不变...
+
+class RolePrompt(db.Model):
+    __tablename__ = 'role_prompts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    role_name = db.Column(db.String(64), nullable=False)
+    teacher_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)  # 系统角色此项为 Null
+    category = db.Column(db.String(32))
+    description = db.Column(db.Text)
+    short_intro = db.Column(db.String(255))
+    prompt_template = db.Column(db.Text, nullable=False)
+    skills = db.Column(db.JSON)
+    use_count = db.Column(db.Integer, default=0)
+    status = db.Column(db.String(10), default='active')
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    # 关联教师模型 (确保 User 模型已定义)
+    teacher = db.relationship('User', backref='created_prompts')
+
+    def to_dict_list(self):
+        """专门给列表页（广场/表格）使用的格式化方法"""
+        return {
+            'id': self.id,
+            'role_name': self.role_name,
+            'content': self.short_intro or (self.prompt_template[:50] + "..."),
+            'teacher_name': self.teacher.username if self.teacher else "系统内置",
+            'importance': 5 if not self.teacher_id else 4,
+            'status': self.status,
+            'category_name': self.category,
+            'is_system': True if not self.teacher_id else False
+        }
+
+    def to_dict(self):
+        """给卡片详情或对话页使用的格式化方法"""
+        return {
+            'id': self.id,
+            'name': self.role_name,
+            'teacher': self.teacher.username if self.teacher else "系统推荐",
+            'category': self.category,
+            'description': self.description,
+            'shortIntro': self.short_intro,
+            'skills': self.skills or [],
+            'useCount': self.use_count,
+            'tagType': 'success' if not self.teacher_id else 'info'
+        }
+
+class RoleCallLog(db.Model):
+    __tablename__ = 'role_call_log'
+    id = db.Column(db.Integer, primary_key=True)
+    # 关联到被调用的角色ID
+    role_id = db.Column(db.Integer, db.ForeignKey('grading_role.id'), nullable=False)
+    # 关联到发起调用的用户ID
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    # 调用发生的时间，默认是记录创建的时间
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # 建立关系（可选，但推荐）
+    role = db.relationship('GradingRole', backref=db.backref('call_logs', lazy=True))
+    user = db.relationship('User', backref=db.backref('role_calls', lazy=True))
+
+    def __repr__(self):
+        return f'<RoleCallLog role_id={self.role_id} user_id={self.user_id}>'

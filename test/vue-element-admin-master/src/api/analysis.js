@@ -17,3 +17,18 @@ export function getDailySubmissions() {
     method: 'get'
   })
 }
+
+export function getCourseRadarData(params) { // 确保能接收参数
+  return request({
+    url: '/analysis/course_radar',
+    method: 'get',
+    params // 将参数传递给 axios
+  })
+}
+
+export function getCourseStudentPieData() {
+  return request({
+    url: '/analysis/course_student_pie',
+    method: 'get'
+  })
+}

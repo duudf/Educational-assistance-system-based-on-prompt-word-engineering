@@ -26,9 +26,11 @@
               AI 分析
             </el-button>
           </router-link>
-          <el-button type="info" size="mini" @click="handleViewDetails(row)">
-            查看详情
-          </el-button>
+          <router-link :to="'/student/profile/'+row.id">
+      <el-button type="info" size="mini" style="margin-left: 10px;">
+        查看详情
+      </el-button>
+    </router-link>
         </template>
       </el-table-column>
     </el-table>
