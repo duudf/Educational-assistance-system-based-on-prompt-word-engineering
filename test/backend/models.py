@@ -1,5 +1,8 @@
 # models.py
 import datetime
+import uuid
+
+import shortuuid
 from sqlalchemy.dialects.sqlite import JSON # 兼容 SQLite 的 JSON 类型
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_sqlalchemy import SQLAlchemy
@@ -7,6 +10,22 @@ from flask_sqlalchemy import SQLAlchemy
 # 初始化 SQLAlchemy 实例
 db = SQLAlchemy()
 
+
+def generate_short_id(model):
+    """
+    为指定的模型生成一个唯一的8位短ID。
+    它会检查数据库确保生成的ID尚不存在。
+    """
+    # 使用字母表'23456789ABCDEFGHJKLMNPQRSTUVWXYZ'避免混淆的字符(0/O, 1/I)
+    alphabet = '23456789'
+    shortuuid.set_alphabet(alphabet)
+
+    while True:
+        # 生成一个8位的短ID
+        new_id = shortuuid.random(length=6)
+        # 检查这个ID是否已经存在于指定的模型表中
+        if not model.query.filter_by(public_id=new_id).first():
+            return new_id
 # -------------------- 模型定义开始 --------------------
 
 # 学生-课程关联表 (用于多对多关系)
@@ -17,6 +36,7 @@ student_courses = db.Table('student_courses',
 
 
 class User(db.Model):
+    public_id = db.Column(db.String(6), unique=True, nullable=False, default=lambda: generate_short_id(User))
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(64), index=True, unique=True, nullable=False)
     password_hash = db.Column(db.String(128))
@@ -30,6 +50,7 @@ class User(db.Model):
 
 
 class Course(db.Model):
+    public_id = db.Column(db.String(6), unique=True, nullable=False, default=lambda: generate_short_id(Course))
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(128), nullable=False)
     description = db.Column(db.Text)
@@ -138,6 +159,7 @@ class PromptTemplate(db.Model):
 # 2. 修改：作业表，增加评分标准字段
 class Assignment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    public_id = db.Column(db.String(6), unique=True, nullable=False, default=lambda: generate_short_id(Assignment))
     title = db.Column(db.String(128), nullable=False)
     content = db.Column(db.Text)  # 作业题目
     due_date = db.Column(db.DateTime)
@@ -148,26 +170,24 @@ class Assignment(db.Model):
     grading_criteria = db.Column(db.Text)
 
     submissions = db.relationship('Submission', backref='assignment', cascade="all, delete-orphan")
-
-
+from datetime import datetime, timezone
 
 class GradingRole(db.Model):
     """AI 评分角色表"""
+    __tablename__ = 'grading_role'  # 明确指定表名，这是一个好习惯
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(64), nullable=False)  # 角色名称，如 "严厉教授"
-    description = db.Column(db.String(256))  # 简短描述，给学生看
-
-    # 这里存放该角色的完整提示词配置（包含得分点逻辑、语气、格式要求）
-    # 这就是你说的“一个单独的文本”
+    name = db.Column(db.String(64), nullable=False)
+    description = db.Column(db.String(256))
     prompt_content = db.Column(db.Text, nullable=False)
-
-    is_system = db.Column(db.Boolean, default=False)  # True=系统默认，False=教师创建
-
-    # 如果是教师创建的，关联到教师ID
+    is_system = db.Column(db.Boolean, default=False)
     creator_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     creator = db.relationship('User', backref='created_roles')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    # --- [核心修改 1] ---
+    # 在 GradingRole 模型中定义与 RoleCallLog 的关系，并设置级联删除策略。
+    # 当一个 GradingRole 被删除时，所有相关的日志记录将自动被删除，从而修复 IntegrityError。
+    call_logs = db.relationship('RoleCallLog', backref='role', cascade="all, delete-orphan", lazy=True)
 
     def to_dict(self):
         return {
@@ -180,20 +200,9 @@ class GradingRole(db.Model):
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M')
         }
 
-def to_dict_list(self):
-    return {
-        'id': self.id,
-        'role_name': self.role_name,
-        'content': self.short_intro or self.prompt_template[:50] + "...", # 预览内容
-        'teacher_name': self.teacher.username if self.teacher else "系统内置", # 判断是否为系统创建
-        'importance': 5 if not self.teacher_id else 4, # 系统角色默认5星，教师4星
-        'status': self.status,
-        'category_name': self.category,
-        'is_system': True if not self.teacher_id else False # 增加一个标识位
-    }
 
-from datetime import datetime
 class RoleCallLog(db.Model):
+    """AI 角色调用日志表"""
     __tablename__ = 'role_call_log'
     id = db.Column(db.Integer, primary_key=True)
     # 关联到被调用的角色ID
@@ -203,9 +212,28 @@ class RoleCallLog(db.Model):
     # 调用发生的时间，默认是记录创建的时间
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # 建立关系（可选，但推荐）
-    role = db.relationship('GradingRole', backref=db.backref('call_logs', lazy=True))
+    # --- [核心修改 2] ---
+    # 移除了这里的 role 关系定义，因为它现在由 GradingRole.call_logs 的 backref='role' 自动创建，
+    # 这样就解决了 InvalidRequestError 命名冲突的问题。
+
+    # 与 User 的关系保持不变
     user = db.relationship('User', backref=db.backref('role_calls', lazy=True))
 
     def __repr__(self):
         return f'<RoleCallLog role_id={self.role_id} user_id={self.user_id}>'
+
+
+# ----------------------------------------------------
+# 这是一个独立的函数，它不属于任何类，请确保它在文件的顶层作用域，而不是缩进在某个类里面。
+# 如果这个函数之前是写在 GradingRole 类里面的，那是不对的。
+def to_dict_list(self):
+    return {
+        'id': self.id,
+        'role_name': self.role_name,
+        'content': self.short_intro or self.prompt_template[:50] + "...",
+        'teacher_name': self.teacher.username if self.teacher else "系统内置",
+        'importance': 5 if not self.teacher_id else 4,
+        'status': self.status,
+        'category_name': self.category,
+        'is_system': True if not self.teacher_id else False
+    }

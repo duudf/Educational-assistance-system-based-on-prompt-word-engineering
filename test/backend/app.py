@@ -177,77 +177,76 @@ def get_dashboard_data(current_user):
     return jsonify({'code': 50000, 'message': '未知角色'})
 
 
-
-
-
 @app.route('/courses', methods=['GET'])
 @token_required
 def get_courses(current_user):
-    """获取课程列表，支持分页和多条件模糊搜索"""
+    """获取课程列表，支持分页和多条件模糊搜索 (已适配 public_id)"""
     page = request.args.get('page', 1, type=int)
     limit = request.args.get('limit', 20, type=int)
     search_term = request.args.get('search', None, type=str)
     fetch_all_for_student = request.args.get('all', 'false').lower() == 'true'
 
-    # --- ↓↓↓ 核心修改：使用教师名字进行过滤 ↓↓↓ ---
-    # 1. 总是从基础查询开始
     base_query = Course.query
 
-    # 2. 根据角色确定数据范围
+    # --- [此处无变化] ---
+    # 决定基础数据范围的逻辑保持不变。
+    # 它正确地使用了内部关系和ID。
     if current_user.role == 'teacher':
-        # 通过关联的 User 模型的 username 字段进行过滤
         query = base_query.join(User, Course.teacher_id == User.id).filter(User.username == current_user.username)
-
     elif current_user.role == 'student':
         if fetch_all_for_student:
             query = base_query
         else:
+            # 内部逻辑使用内部ID效率更高
             enrolled_course_ids = {c.id for c in current_user.enrolled_courses}
             query = base_query.filter(Course.id.in_(enrolled_course_ids)) if enrolled_course_ids else base_query.filter(
                 False)
     else:
         query = base_query
-    # --- ↑↑↑ 修改结束 ↑↑↑ ---
 
-    # 3. 在已确定的数据范围上，应用搜索过滤器
-    # (为了避免与上面的 .join() 冲突，我们在这里也做一次 join)
+    # --- [关键修改 1: 更新搜索逻辑] ---
     if search_term:
         conditions = [
             Course.name.like(f"%{search_term}%"),
-            User.username.like(f"%{search_term}%")
+            User.username.like(f"%{search_term}%"),
+            # 搜索词可能是 public_id，所以我们检查精确匹配。
+            # 不再尝试将其转换为整数。
+            Course.public_id == search_term
         ]
-        try:
-            search_id = int(search_term)
-            conditions.append(Course.id == search_id)
-        except ValueError:
-            pass
-        # 确保在应用 User.username 搜索前已经 join 了 User 表
+        # 仍然需要 join 来按教师用户名进行搜索
         query = query.join(User, Course.teacher_id == User.id, isouter=True).filter(or_(*conditions))
 
+    # --- [此处无变化] ---
+    # 按内部自增的 `id` 排序是获取“最新”条目的高效且正确的方式。
+    # 这并不会向用户暴露ID。
     pagination = query.order_by(Course.id.desc()).paginate(page=page, per_page=limit, error_out=False)
     courses = pagination.items
     total = pagination.total
 
-    # --- ↓↓↓ 核心修复：无论何时都为学生预加载已选课程ID ↓↓↓ ---
+    # --- [此处无变化] ---
+    # 这个逻辑用于内部检查，它正确且高效地使用内部整数ID来确定学生是否已选课。
+    # 这是我们保留内部ID的一个完美理由。
     enrolled_course_ids = set()
     if current_user.role == 'student':
-        # 显式执行查询，确保数据被加载
         enrolled_course_ids = {c.id for c in current_user.enrolled_courses.all()}
-    # --- ↑↑↑ 修复结束 ↑↑↑ ---
 
     items = []
     for course in courses:
         items.append({
-            'id': course.id,
+            # --- [关键修改 2: 更新输出数据] ---
+            # 这是最重要的修改。我们现在将 public_id 发送给前端。
+            'id': course.public_id,
+
             'name': course.name,
             'teacher_name': course.teacher.username if course.teacher else 'N/A',
             'student_count': course.students.count(),
             'description': course.description,
-            'is_enrolled': course.id in enrolled_course_ids if 'enrolled_course_ids' in locals() else False
+
+            # 检查本身仍然使用快速的内部ID。
+            'is_enrolled': course.id in enrolled_course_ids
         })
 
     return jsonify({'code': 20000, 'data': {'total': total, 'items': items}})
-
 
 @app.route('/courses/list', methods=['GET'])
 @token_required
@@ -279,8 +278,9 @@ def get_course_list(current_user):
 @app.route('/assignments', methods=['GET'])
 @token_required
 def get_assignments(current_user):
-    """获取作业列表（分页）"""
+    """获取作业列表（分页），已适配 public_id"""
     page, limit = request.args.get('page', 1, type=int), request.args.get('limit', 20, type=int)
+
     query = Assignment.query
     if current_user.role == 'teacher':
         course_ids = [c.id for c in current_user.courses_taught]
@@ -290,26 +290,44 @@ def get_assignments(current_user):
         query = query.filter(Assignment.course_id.in_(course_ids)) if course_ids else query.filter(False)
 
     pagination = query.order_by(Assignment.id.desc()).paginate(page=page, per_page=limit, error_out=False)
-    return jsonify({'code': 20000, 'data': {
-        'total': pagination.total,
-        'items': [{'id': a.id, 'title': a.title, 'course_name': a.course.name,
-                   'due_date': a.due_date.strftime('%Y-%m-%d %H:%M') if a.due_date else 'N/A',
-                   'submission_count': len(a.submissions)} for a in pagination.items]
-    }})
+
+    items = []
+    for a in pagination.items:
+        items.append({
+            'id': a.public_id,
+            'title': a.title,
+            'course_name': a.course.name,
+            'due_date': a.due_date.strftime('%Y-%m-%d %H:%M') if a.due_date else 'N/A',
+            # --- ↓↓↓ 核心修复点：改回使用 len() ↓↓↓ ---
+            'submission_count': len(a.submissions)
+            # --- ↑↑↑ 核心修复点：改回使用 len() ↑↑↑ ---
+        })
+
+    return jsonify({'code': 20000, 'data': {'total': pagination.total, 'items': items}})
 
 
-@app.route('/assignments/<int:id>', methods=['GET'])
+@app.route('/assignments/<string:public_id>', methods=['GET'])  # <--- 修改点 1
 @token_required
-def get_assignment_detail(current_user, id):
-    """获取单个作业详情"""
-    assignment = db.session.get(Assignment, id)
-    if not assignment: return jsonify({'code': 404, 'message': '作业不存在'}), 404
+def get_assignment_detail(current_user, public_id):  # <--- 修改点 2
+    """获取单个作业详情，已适配 public_id"""
+    # --- [核心修改 3: 使用 public_id 查询] ---
+    assignment = Assignment.query.filter_by(public_id=public_id).first()
+
+    if not assignment:
+        return jsonify({'code': 40400, 'message': '作业不存在'}), 404
+
+    # 权限检查 (逻辑不变)
     if current_user.role == 'teacher' and assignment.course.teacher_id != current_user.id:
-        return jsonify({'code': 403, 'message': '无权访问'}), 403
+        return jsonify({'code': 40300, 'message': '无权访问'}), 403
+
+    # --- [核心修改 4: 输出 public_id] ---
     return jsonify({'code': 20000, 'data': {
-        'id': assignment.id, 'title': assignment.title, 'content': assignment.content,
+        'id': assignment.public_id,
+        'title': assignment.title,
+        'content': assignment.content,
         'display_time': assignment.due_date.isoformat() if assignment.due_date else None,
-        'course_id': assignment.course_id
+        # 返回课程的 public_id 而不是内部 id
+        'course_id': assignment.course.public_id
     }})
 
 
@@ -331,19 +349,39 @@ def create_assignment(current_user):
     return jsonify({'code': 20000, 'data': {'id': new_assignment.id}, 'message': '创建成功'})
 
 
-@app.route('/assignments/<int:id>', methods=['PUT'])
+@app.route('/assignments/<string:public_id>', methods=['PUT'])  # <--- 修改点 1
 @token_required
-def update_assignment(current_user, id):
-    """更新作业"""
-    assignment = db.session.get(Assignment, id)
-    if not assignment: return jsonify({'code': 404, 'message': '作业不存在'}), 404
-    if current_user.role != 'teacher' or assignment.course.teacher_id != current_user.id:
-        return jsonify({'code': 403, 'message': '无权修改'}), 403
+def update_assignment(current_user, public_id):  # <--- 修改点 2
+    """更新作业，已适配 public_id"""
+
+    # --- [核心修改 3: 使用 public_id 和 teacher_id 进行查询，一步完成查找和权限验证] ---
+    assignment = Assignment.query.join(Course).filter(
+        Assignment.public_id == public_id,
+        Course.teacher_id == current_user.id
+    ).first()
+
+    if not assignment:
+        return jsonify({'code': 40400, 'message': '作业不存在或您无权修改'}), 404
+
+    # 如果找到了作业，说明权限验证也通过了，可以直接更新
     data = request.get_json()
     assignment.title = data.get('title', assignment.title)
     assignment.content = data.get('content', assignment.content)
-    assignment.due_date = datetime.datetime.fromisoformat(data.get('display_time')) if data.get(
-        'display_time') else None
+
+    # [优化] 增加对 display_time 的健壮性处理
+    display_time_str = data.get('display_time')
+    if display_time_str:
+        try:
+            # 尝试解析 ISO 格式的日期时间字符串
+            assignment.due_date = datetime.datetime.fromisoformat(display_time_str)
+        except (ValueError, TypeError):
+            # 如果格式不正确或不是字符串，可以选择忽略或返回错误
+            print(f"警告：收到了无效的日期格式: {display_time_str}")
+            # return jsonify({'code': 40000, 'message': '日期时间格式不正确'}), 400
+            assignment.due_date = None  # 或者直接设为 None
+    else:
+        assignment.due_date = None
+
     db.session.commit()
     return jsonify({'code': 20000, 'message': '更新成功'})
 
@@ -370,44 +408,44 @@ def create_course(current_user):
     return jsonify({'code': 20000, 'data': {'id': new_course.id}, 'message': '创建成功'})
 # --- ↑↑↑ 添加结束 ↑↑↑ ---
 
-@app.route('/courses/<int:id>', methods=['GET'])
+@app.route('/courses/<string:public_id>', methods=['GET'])  # <--- 修改点 1
 @token_required
-def get_course_detail(current_user, id):
-    """获取单个课程详情"""
-    # 1. 查询课程
-    course = db.session.get(Course, id)
+def get_course_detail(current_user, public_id):  # <--- 修改点 2
+    """获取单个课程详情，已适配 public_id"""
 
-    # 2. 检查课程是否存在
+    # --- [核心修改 3: 使用 public_id 查询] ---
+    course = Course.query.filter_by(public_id=public_id).first()
+
+    # 检查课程是否存在
     if not course:
-        return jsonify({'code': 404, 'message': '课程不存在'}), 404
+        return jsonify({'code': 40400, 'message': '课程不存在'}), 404
 
-    # 3. (可选) 安全检查：确保教师只能查看自己课程的详情
+    # 安全检查：确保教师只能查看自己课程的详情 (逻辑不变)
     if current_user.role == 'teacher' and course.teacher_id != current_user.id:
-        return jsonify({'code': 403, 'message': '无权访问此课程'}), 403
+        return jsonify({'code': 40300, 'message': '无权访问此课程'}), 403
 
-    # 4. 准备要返回的数据
+    # --- [核心修改 4: 准备返回的数据，使用 public_id] ---
     data = {
-        'id': course.id,
+        'id': course.public_id,
         'name': course.name,
         'description': course.description
     }
 
-    # --- ↓↓↓ 确保函数总是有返回值 ↓↓↓ ---
-    # 5. 返回成功的响应
+    # 返回成功的响应
     return jsonify({'code': 20000, 'data': data})
 
 
 
-@app.route('/courses/<int:course_id>', methods=['DELETE'])
+@app.route('/courses/<string:public_id>', methods=['DELETE'])
 @token_required
-def delete_course(current_user, course_id):
+def delete_course(current_user,public_id):
     """删除一个课程"""
     # 1. 权限校验：必须是教师才能执行删除操作
     if current_user.role != 'teacher':
         return jsonify({'code': 403, 'message': '您没有权限执行此操作'}), 403
 
     # 2. 查找课程
-    course = db.session.get(Course, course_id)
+    course = Course.query.filter_by(public_id=public_id, teacher_id=current_user.id).first()
     if not course:
         return jsonify({'code': 404, 'message': '课程不存在'}), 404
 
@@ -429,46 +467,51 @@ def delete_course(current_user, course_id):
 @app.route('/students', methods=['GET'])
 @token_required
 def get_students(current_user):
-    """获取学生列表，支持按课程ID筛选和分页（最终健壮版）"""
+    """获取学生列表，支持按课程 public_id 筛选和分页 (已适配 public_id)"""
     page = request.args.get('page', 1, type=int)
     limit = request.args.get('limit', 20, type=int)
-    course_id_str = request.args.get('course_id')
 
-    # 1. 总是从一个基础查询开始：所有角色为'student'的用户
+    # --- [关键修改 1: 接收课程的 public_id] ---
+    course_public_id = request.args.get('course_id')  # 参数名保持 course_id，但值是 public_id
+
+    # 1. 基础查询：所有角色为'student'的用户
     query = User.query.filter_by(role='student')
 
-    # 2. 如果前端传入了 course_id，则应用筛选
-    if course_id_str and course_id_str.isdigit():
-        course_id = int(course_id_str)
-        course = db.session.get(Course, course_id)
+    # 2. 如果前端传入了 course_public_id，则应用筛选
+    if course_public_id:
+        # --- [关键修改 2: 使用 public_id 查询课程] ---
+        course = Course.query.filter_by(public_id=course_public_id).first()
 
         if course:
-            # 安全检查
+            # 安全检查 (逻辑不变，但更健壮)
             if current_user.role == 'teacher' and course.teacher_id != current_user.id:
-                return jsonify({'code': 403, 'message': '无权访问该课程的学生列表'}), 403
+                return jsonify({'code': 40300, 'message': '无权访问该课程的学生列表'}), 403
 
-            # --- ↓↓↓ 核心修改：使用子查询进行筛选 ↓↓↓ ---
-            # 步骤 a: 在 student_courses 表中找出所有 course_id 匹配的学生 ID
+            # --- [关键修改 3: 子查询仍然使用内部的高效整数ID] ---
+            # 这一部分的逻辑是纯后端的，为了性能，我们继续使用内部ID进行关联查询。
+            # 这是 public_id 模式的最佳实践：对外用 public_id，对内用 id。
             student_ids_subquery = db.session.query(student_courses.c.user_id).filter(
-                student_courses.c.course_id == course_id)
+                student_courses.c.course_id == course.id)  # 使用 course.id (内部整数)
 
-            # 步骤 b: 在 User 表中筛选出 ID 在上面子查询结果中的学生
-            query = query.filter(User.id.in_(student_ids_subquery))
-            # --- ↑↑↑ 修改结束 ↑↑↑ ---
+            # 在 User 表中筛选出 ID 在上面子查询结果中的学生
+            query = query.filter(User.id.in_(student_ids_subquery))  # 使用 User.id (内部整数)
+
         else:
-            # 如果课程ID无效，返回空结果
+            # 如果课程 public_id 无效，返回空结果
             query = query.filter(False)
 
-    # 3. 对最终确定的查询对象进行排序和分页
+    # 3. 排序和分页 (逻辑不变，使用内部 id 排序效率高)
     pagination = query.order_by(User.id.asc()).paginate(page=page, per_page=limit, error_out=False)
     students = pagination.items
     total = pagination.total
 
-    # 4. 构建返回数据 (保持不变)
+    # 4. 构建返回数据
     items = []
     for student in students:
         items.append({
-            'id': student.id,
+            # --- [关键修改 4: 对外暴露学生的 public_id] ---
+            'id': student.public_id,
+
             'name': student.username,
             'enrolled_course_count': student.enrolled_courses.count(),
             'submission_count': len(student.submissions)
@@ -476,46 +519,50 @@ def get_students(current_user):
 
     return jsonify({'code': 20000, 'data': {'total': total, 'items': items}})
 
-
 # ======================================================================
 # 8. AI 智能分析 (AI Analysis) - 完整最终版
 # ======================================================================
 
 
-@app.route('/students/<int:student_id>/analysis', methods=['GET'])
+@app.route('/students/<string:public_id>/analysis', methods=['GET'])  # <--- 修改点 1
 @token_required
-def get_student_analysis(current_user, student_id):
+def get_student_analysis(current_user, public_id):  # <--- 修改点 2
+    """使用 AI 分析单个学生的学习情况，已适配 public_id"""
+
+    # --- [打印调试信息，保持不变] ---
     print("=" * 50)
     print(f"收到请求: {request.method} {request.path}")
-    print(f"完整的 URL Query 参数 (request.args): {request.args}")
-    print(f"获取 'force_refresh' 的值: {request.args.get('force_refresh')}")
-    print("=" * 50)
+    # ...
 
-    """使用 AI 分析单个学生的学习情况，支持缓存、强制刷新和对比"""
     if current_user.role != 'teacher':
-        return jsonify({'code': 403, 'message': '权限不足'}), 403
+        return jsonify({'code': 40300, 'message': '权限不足'}), 403
 
-    student = db.session.get(User, student_id)
+    # --- [关键修改 3: 使用 public_id 查询学生] ---
+    student = User.query.filter_by(public_id=public_id).first()
+
     if not student or student.role != 'student':
-        return jsonify({'code': 404, 'message': '学生不存在'}), 404
+        return jsonify({'code': 40400, 'message': '学生不存在'}), 404
 
-    # ✅ 修复后代码（兼容 'true'/'True'/'TRUE' 所有格式，无参数时默认false）
+    # --- [关键修改 4: 后续所有内部查询都使用 student.id (整数)] ---
+    # 这是最佳实践，因为 AnalysisReport, Submission 等模型都是通过整数外键关联的。
+    student_internal_id = student.id
+
     force_refresh = request.args.get('force_refresh', 'false').lower() == 'true'
 
-    report_record = AnalysisReport.query.filter_by(student_id=student_id).first()
+    report_record = AnalysisReport.query.filter_by(student_id=student_internal_id).first()
     previous_report = report_record.report_json if report_record else None
 
     # 如果不需要强制刷新，并且有旧报告，直接返回
     if previous_report and not force_refresh:
-        print(f"为学生 {student_id} 找到了缓存的AI报告，直接返回。")
+        print(f"为学生 ID:{student_internal_id} 找到了缓存的AI报告，直接返回。")
         return jsonify({'code': 20000, 'data': {
             'current': previous_report,
-            'previous': None,  # 首次加载时，previous 为 null
+            'previous': None,
             'last_updated': report_record.last_updated.isoformat()
         }})
 
     # --- 开始生成新报告 ---
-    print(f"为学生 {student_id} 生成新的AI报告 (强制刷新: {force_refresh})")
+    print(f"为学生 ID:{student_internal_id} 生成新的AI报告 (强制刷新: {force_refresh})")
 
     submissions = Submission.query.filter_by(student_id=student.id).order_by(Submission.submission_date.desc()).all()
     if not submissions:
@@ -580,12 +627,13 @@ def get_student_analysis(current_user, student_id):
 
         current_report = json.loads(cleaned_json_string)
 
+        # --- [关键修改 5: 保存或更新报告时，使用 student.id] ---
         if report_record:
             report_record.report_json = current_report
-            # 更新 last_updated 时间
-            report_record.last_updated = datetime.datetime.utcnow()
+            report_record.last_updated = datetime.datetime.now(datetime.timezone.utc)  # 推荐使用 timezone-aware
         else:
-            report_record = AnalysisReport(student_id=student_id, report_json=current_report)
+            # 创建新记录时，外键 student_id 必须是整数
+            report_record = AnalysisReport(student_id=student_internal_id, report_json=current_report)
             db.session.add(report_record)
         db.session.commit()
 
@@ -771,39 +819,45 @@ def grade_submission(current_user, submission_id):
 # 课程选修 (Course Enrollment) - 新增
 # ======================================================================
 
-
+# --- [修改后] ---
 @app.route('/courses/enroll', methods=['POST'])
 @token_required
 def enroll_course(current_user):
-    """学生选课/退课接口"""
+    """学生选课/退课接口 (已适配 public_id)"""
     if current_user.role != 'student':
-        return jsonify({'code': 403, 'message': '只有学生才能进行此操作'}), 403
+        return jsonify({'code': 40300, 'message': '只有学生才能进行此操作'}), 403
 
     data = request.get_json()
     if not data:
-        return jsonify({'code': 400, 'message': '缺少请求数据'}), 400
+        return jsonify({'code': 40000, 'message': '缺少请求数据'}), 400
 
-    course_id = data.get('course_id')
-    action = data.get('action')  # 'enroll' (选课) or 'drop' (退课)
+    # --- [关键修改 1: 接收课程的 public_id] ---
+    # JSON中的 'course_id' 键现在应该包含一个字符串类型的 public_id
+    course_public_id = data.get('course_id')
+    action = data.get('action')
 
-    if not course_id or not action:
-        return jsonify({'code': 400, 'message': '缺少 course_id 或 action 参数'}), 400
+    if not course_public_id or not action:
+        return jsonify({'code': 40000, 'message': '缺少 course_id 或 action 参数'}), 400
 
-    course = db.session.get(Course, course_id)
+    # --- [关键修改 2: 使用 public_id 查询课程] ---
+    # 使用 filter_by 来通过 public_id 查找课程对象
+    course = Course.query.filter_by(public_id=course_public_id).first()
+
     if not course:
-        return jsonify({'code': 404, 'message': '课程不存在'}), 404
+        return jsonify({'code': 40400, 'message': '课程不存在'}), 404
 
-    # 检查学生是否已经选了这门课
-    # 使用 .filter() 会比 .all() 更高效，因为它只检查存在性
-    is_enrolled = current_user.enrolled_courses.filter(Course.id == course_id).count() > 0
+    # --- [关键修改 3: 内部检查依然使用高效的整数ID] ---
+    # 我们用刚查到的 course 对象的内部整数ID (course.id) 来进行存在性检查
+    is_enrolled = current_user.enrolled_courses.filter(Course.id == course.id).count() > 0
 
     print(f"学生 {current_user.username} 正在对课程 '{course.name}' 执行 '{action}' 操作。当前选课状态: {is_enrolled}")
 
+    # --- [逻辑不变] ---
+    # 后续的 append/remove 操作直接作用于我们已经查到的 course 对象，所以无需修改
     if action == 'enroll':
         if is_enrolled:
             print(f"操作失败：学生已选该课程，无法重复选择。")
             return jsonify({'code': 400, 'message': '您已选择该课程，请勿重复操作'}), 400
-        # 将课程添加到学生的已选课程列表中
         current_user.enrolled_courses.append(course)
         message = '选课成功'
         print(f"操作成功：已为学生添加课程。")
@@ -812,18 +866,14 @@ def enroll_course(current_user):
         if not is_enrolled:
             print(f"操作失败：学生未选该课程，无法退课。")
             return jsonify({'code': 400, 'message': '您未选择该课程，无法退课'}), 400
-        # 从学生的已选课程列表中移除该课程
         current_user.enrolled_courses.remove(course)
         message = '退课成功'
         print(f"操作成功：已为学生移除课程。")
-
     else:
         return jsonify({'code': 400, 'message': '无效的操作'}), 400
 
-    # 提交数据库会话以保存更改
     db.session.commit()
     return jsonify({'code': 20000, 'message': message})
-
 
 
 @app.route('/student/assignments', methods=['GET'])
@@ -1601,42 +1651,53 @@ def get_course_student_pie_data(current_user):
 
 
 # --- ↓↓↓ 新增：获取学生详情 API ↓↓↓ ---
-@app.route('/students/<int:student_id>/profile', methods=['GET'])
+# --- [修改后] ---
+# 1. 将路由参数从 <int:student_id> 改为 <string:public_id>
+@app.route('/students/<string:public_id>/profile', methods=['GET'])
 @token_required
-def get_student_profile(current_user, student_id):
-    """获取单个学生的详细信息、已选课程和提交记录"""
+def get_student_profile(current_user, public_id):  # 2. 函数参数名也同步修改
+    """获取单个学生的详细信息、已选课程和提交记录 (已适配 public_id)"""
     if current_user.role != 'teacher':
-        return jsonify({'code': 403, 'message': '只有教师有权查看学生详情'}), 403
+        return jsonify({'code': 40300, 'message': '只有教师有权查看学生详情'}), 403
 
-    student = db.session.get(User, student_id)
+    # 3. 使用 public_id 进行查询
+    student = User.query.filter_by(public_id=public_id).first()
+
+    # 检查学生是否存在且角色正确
     if not student or student.role != 'student':
-        return jsonify({'code': 404, 'message': '学生不存在'}), 404
+        return jsonify({'code': 40400, 'message': '学生不存在'}), 404
 
-    # 获取学生已选课程
+    # 4. 获取学生已选课程，并使用课程的 public_id
     enrolled_courses = [{
-        'id': c.id,
+        'id': c.public_id,  # <--- 修改点
         'name': c.name,
         'teacher_name': c.teacher.username
     } for c in student.enrolled_courses]
 
-    # 获取学生所有提交记录
+    # 5. 获取学生所有提交记录
+    #    (Submission 模型我们没有添加 public_id，因为它通常不直接对外暴露。
+    #    如果需要，也应为其添加 public_id 并在此处替换。)
     submissions = [{
-        'id': s.id,
+        'id': s.id,  # 假设 Submission 的 ID 仍然是内部整数 ID
         'assignment_title': s.assignment.title,
+        # 6. 使用作业(Assignment)的 public_id
+        'assignment_id': s.assignment.public_id,  # <--- 新增字段，方便前端跳转
         'course_name': s.assignment.course.name,
         'submission_date': s.submission_date.strftime('%Y-%m-%d %H:%M'),
         'status': s.status,
         'grade': s.grade
     } for s in student.submissions]
 
+    # 7. 构建返回数据，使用学生的 public_id
     data = {
-        'id': student.id,
+        'id': student.public_id,  # <--- 修改点
         'name': student.username,
         'enrolled_courses': enrolled_courses,
         'submissions': submissions
     }
 
     return jsonify({'code': 20000, 'data': data})
+
 
 
 
@@ -2306,32 +2367,32 @@ def delete_teacher_role(current_user, role_id):
     return jsonify({'code': 20000, 'message': '删除成功'})
 
 # --- ↓↓↓ [新增] 删除单份作业提交的 API 接口 ↓↓↓ ---
-
-
-@app.route('/assignments/<int:assignment_id>', methods=['DELETE'])
+# --- [修改后] ---
+@app.route('/assignments/<string:public_id>', methods=['DELETE'])  # <--- 修改点 1
 @token_required
-def delete_assignment(current_user, assignment_id):
-    """删除一个作业及其所有提交记录"""
-    # 1. 基础权限校验：必须是教师
+def delete_assignment(current_user, public_id):  # <--- 修改点 2
+    """删除一个作业及其所有提交记录，已适配 public_id"""
+
+    # 基础权限校验 (保持不变)
     if current_user.role != 'teacher':
-        return jsonify({'code': 403, 'message': '您没有权限执行此操作'}), 403
+        return jsonify({'code': 40300, 'message': '您没有权限执行此操作'}), 403
 
-    # 2. 查找作业
-    assignment = db.session.get(Assignment, assignment_id)
+    # --- [核心修改 3: 使用 public_id 和 teacher_id 进行查询，一步完成查找和权限验证] ---
+    assignment = Assignment.query.join(Course).filter(
+        Assignment.public_id == public_id,
+        Course.teacher_id == current_user.id
+    ).first()
+
+    # 如果查询结果为 None，说明作业不存在或当前教师无权删除
     if not assignment:
-        return jsonify({'code': 404, 'message': '作业不存在'}), 404
+        return jsonify({'code': 40400, 'message': '作业不存在或您无权删除'}), 404
 
-    # 3. [至关重要] 身份校验：确保当前教师是该作业所属课程的授课教师
-    if assignment.course.teacher_id != current_user.id:
-        return jsonify({'code': 403, 'message': '您只能删除自己课程下的作业'}), 403
-
-    # 4. 执行删除
-    # 假设您的 Assignment 和 Submission 模型之间设置了级联删除 (cascade="all, delete-orphan")
-    # 那么删除 assignment 会自动删除所有关联的 submission
+    # 执行删除。由于模型中设置了级联删除，相关的 Submission 会被自动一并删除。
     db.session.delete(assignment)
     db.session.commit()
 
     return jsonify({'code': 20000, 'message': '作业及所有提交记录已成功删除'})
+
 
 
 @app.route('/ai/teacher/roles/daily-stats', methods=['GET'])
