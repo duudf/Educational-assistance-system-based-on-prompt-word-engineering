@@ -1,100 +1,263 @@
-# seed.py
-
-import click
-from flask.cli import with_appcontext
-from app import db
-from models import User, Course, Assignment, Submission, PracticeRecord, FavoriteQuiz, AnalysisReport
+# models.py
 import datetime
-import json
+from sqlalchemy.dialects.sqlite import JSON # 兼容 SQLite 的 JSON 类型
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask_sqlalchemy import SQLAlchemy
+
+# 初始化 SQLAlchemy 实例
+db = SQLAlchemy()
+
+# -------------------- 模型定义开始 --------------------
+
+# 学生-课程关联表 (用于多对多关系)
+student_courses = db.Table('student_courses',
+                           db.Column('user_id', db.Integer, db.ForeignKey('user.id'), primary_key=True),
+                           db.Column('course_id', db.Integer, db.ForeignKey('course.id'), primary_key=True)
+                           )
 
 
-@click.command('seed')
-@with_appcontext
-def seed_command():
-    """清空数据库并填充所有模型的标准测试数据"""
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(64), index=True, unique=True, nullable=False)
+    password_hash = db.Column(db.String(128))
+    role = db.Column(db.String(64), nullable=False, default='student')  # 角色字段
 
-    print("--- 开始清空数据库 ---")
-    db.drop_all()
-    db.create_all()
-    print("--- 数据库已清空并重建 ---")
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
 
-    print("\n--- 正在创建用户 ---")
-    password = '111111'
-    teacher_z = User(username='z', role='teacher');
-    teacher_z.set_password(password)
-    student_zz = User(username='zz', role='student');
-    student_zz.set_password(password)
-    student_zzz = User(username='zzz', role='student');
-    student_zzz.set_password(password)
-    student_zzzz = User(username='zzzz', role='student');
-    student_zzzz.set_password(password)
-    db.session.add_all([teacher_z, student_zz, student_zzz, student_zzzz])
-    db.session.commit()
-    print("用户创建完成: 1名教师, 3名学生。密码均为 '111111'")
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
 
-    print("\n--- 正在创建课程 ---")
-    course_prompt = Course(name='提示词工程入门', description='学习如何与AI高效对话', teacher=teacher_z)
-    course_python = Course(name='Python编程基础', description='从零开始学习Python', teacher=teacher_z)
-    course_ai = Course(name='人工智能导论', description='探索AI的核心概念', teacher=teacher_z)
-    db.session.add_all([course_prompt, course_python, course_ai])
-    db.session.commit()
-    print("课程创建完成: 3门课程，均由 'z' 老师创建")
 
-    print("\n--- 正在处理学生选课 ---")
-    student_zz.enrolled_courses.extend([course_prompt, course_ai])
-    student_zzz.enrolled_courses.extend([course_prompt, course_python])
-    student_zzzz.enrolled_courses.append(course_python)
-    db.session.commit()
-    print("学生选课关系已建立")
+class Course(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(128), nullable=False)
+    description = db.Column(db.Text)
 
-    print("\n--- 正在创建作业 ---")
-    assignment1 = Assignment(title='Prompt基础：编写清晰的指令', course=course_prompt,
-                             due_date=datetime.datetime.utcnow() + datetime.timedelta(days=7))
-    assignment2 = Assignment(title='Python基础：变量与循环', course=course_python,
-                             due_date=datetime.datetime.utcnow() + datetime.timedelta(days=10))
-    assignment3 = Assignment(title='已过期的作业', course=course_python,
-                             due_date=datetime.datetime.utcnow() - datetime.timedelta(days=1))
-    db.session.add_all([assignment1, assignment2, assignment3])
-    db.session.commit()
-    print("作业创建完成: 3份作业")
+    # 关联到创建该课程的教师 (外键)
+    teacher_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    # 'teacher' 属性让我们能通过 Course.teacher 访问到创建者 User 对象
+    teacher = db.relationship('User', backref='courses_taught')  # 将 backref 改为 courses_taught 避免与 User.courses 冲突
 
-    print("\n--- 正在模拟学生提交作业 ---")
-    sub1 = Submission(content='<p>这是 <strong>zz</strong> 对 Prompt 作业的回答。</p>', student=student_zz,
-                      assignment=assignment1, status='submitted')
-    sub2 = Submission(content='<p>这是 <strong>zzz</strong> 对 Prompt 作业的回答。</p>', student=student_zzz,
-                      assignment=assignment1, status='graded', grade=95.0)
-    sub3 = Submission(content='print("Hello, Python!")', student=student_zzz, assignment=assignment2, status='graded',
-                      grade=88.5)
-    db.session.add_all([sub1, sub2, sub3])
-    db.session.commit()
-    print("作业提交记录创建完成: 3条")
+    # 关联到该课程下的所有作业 (一对多关系)
+    assignments = db.relationship('Assignment', backref='course', lazy='dynamic')
 
-    print("\n--- 正在创建AI练习和收藏记录 (为学生 zz) ---")
-    quiz_data1 = {"type": "简答题", "question": "什么是上下文学习(In-Context Learning)?", "answer": "...",
-                  "explanation": "..."}
-    p_record1 = PracticeRecord(student=student_zz, quiz_data=quiz_data1, user_answer="我的回答是...", ai_grade=80,
-                               ai_feedback="回答基本正确，但可以更深入...")
+    # 关联到所有选修该课程的学生 (多对多关系)
+    students = db.relationship('User', secondary=student_courses,
+                               backref=db.backref('enrolled_courses', lazy='dynamic'),
+                               lazy='dynamic')
 
-    fav_quiz_data = {"type": "编程题", "question": "请用Python实现一个简单的斐波나契数列函数。", "answer": "...",
-                     "explanation": "..."}
-    fav1 = FavoriteQuiz(student=student_zz, quiz_data=fav_quiz_data)
 
-    db.session.add_all([p_record1, fav1])
-    db.session.commit()
-    print("AI练习与收藏记录创建完成")
 
-    print("\n--- 正在创建AI分析报告 (为学生 zz) ---")
-    report_data = {
-        "activity_score": 4, "performance_score": 5, "knowledge_mastery_score": 4,
-        "innovation_score": 3, "consistency_score": 4, "potential_score": 5,
-        "strengths": ["提示词理解能力强", "学习态度积极"],
-        "suggestions": ["尝试更复杂的编程练习", "多参与课程讨论"],
-        "summary": "该学生学习主动性强，在AI相关课程上表现出色，潜力巨大。"
+
+
+class Prompt(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(256), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    # 关联到创建该提示词的教师
+    teacher_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    teacher = db.relationship('User', backref='prompts')
+
+
+class Submission(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    content = db.Column(db.Text)
+    submission_date = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    status = db.Column(db.String(64), default='submitted')  # e.g., 'submitted', 'graded'
+    grade = db.Column(db.Float)
+
+    # 关联到提交该作业的学生
+    student_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    student = db.relationship('User', backref='submissions')
+
+    # 关联到对应的作业
+    assignment_id = db.Column(db.Integer, db.ForeignKey('assignment.id'))
+    # assignment = db.relationship('Assignment', backref='submissions')
+
+
+# --- ↓↓↓ 在文件底部添加新模型 ↓↓↓ ---
+class AnalysisReport(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    # 关联到学生 (一对一关系)
+    student_id = db.Column(db.Integer, db.ForeignKey('user.id'), unique=True, nullable=False)
+    student = db.relationship('User', backref=db.backref('analysis_report', uselist=False))
+
+    # 使用 JSON 类型存储 AI 返回的完整报告
+    report_json = db.Column(JSON, nullable=False)
+
+    # 记录最后更新时间
+    last_updated = db.Column(db.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+# models.py
+class PracticeRecord(db.Model):
+    """AI 出题练习记录"""
+    id = db.Column(db.Integer, primary_key=True)
+
+    student_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    student = db.relationship('User', backref='practice_records')
+
+    # 存储完整的题目 JSON 数据
+    quiz_data = db.Column(JSON, nullable=False)
+
+    # 学生的答案
+    user_answer = db.Column(db.Text)
+
+    # AI 的评分 (0-100)
+    ai_grade = db.Column(db.Integer)
+
+    # AI 的评语
+    ai_feedback = db.Column(db.Text)
+
+    # 练习时间
+    practice_date = db.Column(db.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+class FavoriteQuiz(db.Model):
+    """学生收藏的题目"""
+    id = db.Column(db.Integer, primary_key=True)
+    # 关联到学生
+    student_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    student = db.relationship('User', backref='favorite_quizzes')
+
+    # 直接存储题目的 JSON 数据
+    quiz_data = db.Column(JSON, nullable=False)
+    add_date = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+
+# 1. 新增：提示词模板表 (对应你截图里的“默认助手”、“作业助手”等)
+class PromptTemplate(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(64), nullable=False)  # 例如：'简答题-关键词评分法'
+    description = db.Column(db.String(256))  # 例如：'根据关键词命中情况给分'
+    # 模板核心内容，里面会有占位符 {criteria}
+    template_content = db.Column(db.Text, nullable=False)
+    is_system = db.Column(db.Boolean, default=False)  # 是否为系统预设
+
+
+# 2. 修改：作业表，增加评分标准字段
+class Assignment(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(128), nullable=False)
+    content = db.Column(db.Text)  # 作业题目
+    due_date = db.Column(db.DateTime)
+    course_id = db.Column(db.Integer, db.ForeignKey('course.id'))
+
+    # --- ↓↓↓ 新增字段 ↓↓↓ ---
+    # 老师针对这道题写的具体得分点 (例如："提到TCP得2分...")
+    grading_criteria = db.Column(db.Text)
+
+    submissions = db.relationship('Submission', backref='assignment', cascade="all, delete-orphan")
+
+
+
+class GradingRole(db.Model):
+    """AI 评分角色表"""
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(64), nullable=False)  # 角色名称，如 "严厉教授"
+    description = db.Column(db.String(256))  # 简短描述，给学生看
+
+    # 这里存放该角色的完整提示词配置（包含得分点逻辑、语气、格式要求）
+    # 这就是你说的“一个单独的文本”
+    prompt_content = db.Column(db.Text, nullable=False)
+
+    is_system = db.Column(db.Boolean, default=False)  # True=系统默认，False=教师创建
+
+    # 如果是教师创建的，关联到教师ID
+    creator_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    creator = db.relationship('User', backref='created_roles')
+
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'content': self.prompt_content,
+            'is_system': self.is_system,
+            'creator': self.creator.username if self.creator else "系统内置",
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M')
+        }
+
+def to_dict_list(self):
+    return {
+        'id': self.id,
+        'role_name': self.role_name,
+        'content': self.short_intro or self.prompt_template[:50] + "...", # 预览内容
+        'teacher_name': self.teacher.username if self.teacher else "系统内置", # 判断是否为系统创建
+        'importance': 5 if not self.teacher_id else 4, # 系统角色默认5星，教师4星
+        'status': self.status,
+        'category_name': self.category,
+        'is_system': True if not self.teacher_id else False # 增加一个标识位
     }
-    analysis1 = AnalysisReport(student=student_zz, report_json=report_data)
 
-    db.session.add(analysis1)
-    db.session.commit()
-    print("AI分析报告创建完成")
 
-    print("\n\n✅✅✅ 所有测试数据已成功填充到数据库！ ✅✅✅")
+# backend/models.py
+# from exts import db
+from datetime import datetime
+
+
+# 这里是之前其他的模型 (User, Course 等)，保持不变...
+
+# class RolePrompt(db.Model):
+#     __tablename__ = 'role_prompts'
+#
+#     id = db.Column(db.Integer, primary_key=True)
+#     role_name = db.Column(db.String(64), nullable=False)
+#     teacher_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)  # 系统角色此项为 Null
+#     category = db.Column(db.String(32))
+#     description = db.Column(db.Text)
+#     short_intro = db.Column(db.String(255))
+#     prompt_template = db.Column(db.Text, nullable=False)
+#     skills = db.Column(db.JSON)
+#     use_count = db.Column(db.Integer, default=0)
+#     status = db.Column(db.String(10), default='active')
+#     created_at = db.Column(db.DateTime, default=datetime.now)
+#
+#     # 关联教师模型 (确保 User 模型已定义)
+#     teacher = db.relationship('User', backref='created_prompts')
+#
+#     def to_dict_list(self):
+#         """专门给列表页（广场/表格）使用的格式化方法"""
+#         return {
+#             'id': self.id,
+#             'role_name': self.role_name,
+#             'content': self.short_intro or (self.prompt_template[:50] + "..."),
+#             'teacher_name': self.teacher.username if self.teacher else "系统内置",
+#             'importance': 5 if not self.teacher_id else 4,
+#             'status': self.status,
+#             'category_name': self.category,
+#             'is_system': True if not self.teacher_id else False
+#         }
+#
+#     def to_dict(self):
+#         """给卡片详情或对话页使用的格式化方法"""
+#         return {
+#             'id': self.id,
+#             'name': self.role_name,
+#             'teacher': self.teacher.username if self.teacher else "系统推荐",
+#             'category': self.category,
+#             'description': self.description,
+#             'shortIntro': self.short_intro,
+#             'skills': self.skills or [],
+#             'useCount': self.use_count,
+#             'tagType': 'success' if not self.teacher_id else 'info'
+#         }
+
+class RoleCallLog(db.Model):
+    __tablename__ = 'role_call_log'
+    id = db.Column(db.Integer, primary_key=True)
+    # 关联到被调用的角色ID
+    role_id = db.Column(db.Integer, db.ForeignKey('grading_role.id'), nullable=False)
+    # 关联到发起调用的用户ID
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    # 调用发生的时间，默认是记录创建的时间
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # 建立关系（可选，但推荐）
+    role = db.relationship('GradingRole', backref=db.backref('call_logs', lazy=True))
+    user = db.relationship('User', backref=db.backref('role_calls', lazy=True))
+
+    def __repr__(self):
+        return f'<RoleCallLog role_id={self.role_id} user_id={self.user_id}>'

@@ -7,9 +7,9 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from config import Config
 from models import db, User, Course, Assignment, Submission, Prompt, AnalysisReport, FavoriteQuiz, PracticeRecord, \
-    GradingRole, student_courses, PromptTemplate, RolePrompt, RoleCallLog
-from sqlalchemy import or_
-student_courses, PromptTemplate
+    GradingRole, student_courses, PromptTemplate, RoleCallLog
+# from sqlalchemy import or_
+# student_courses, PromptTemplate
 from flask_migrate import Migrate
 import openai
 import json
@@ -146,11 +146,11 @@ def get_dashboard_data(current_user):
             recent_assignments_data = [{'title': a.title, 'course_name': a.course.name,
                                         'due_date': a.due_date.strftime('%Y-%m-%d') if a.due_date else 'N/A'} for a in
                                        recent_assignments]
-
+        prompt_count = GradingRole.query.filter_by(creator_id=current_user.id).count()
         return jsonify({'code': 20000, 'data': {
             'studentCount': len(unique_student_ids),
             'courseCount': len(teacher_courses),
-            'promptCount': Prompt.query.filter_by(teacher_id=current_user.id).count(),
+             'promptCount': prompt_count, # 使用我们新查询到的值
             'reviewCount': review_count,
             'recent_assignments': recent_assignments_data
         }})

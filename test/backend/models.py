@@ -135,15 +135,6 @@ class PromptTemplate(db.Model):
     is_system = db.Column(db.Boolean, default=False)  # 是否为系统预设
 
 
-# class Assignment(db.Model):
-#     id = db.Column(db.Integer, primary_key=True)
-#     title = db.Column(db.String(128), nullable=False)
-#     content = db.Column(db.Text)
-#     due_date = db.Column(db.DateTime)
-#     submissions = db.relationship('Submission', backref='assignment', cascade="all, delete-orphan")
-#     # 关联到所属的课程 (外键)
-#     course_id = db.Column(db.Integer, db.ForeignKey('course.id'))
-
 # 2. 修改：作业表，增加评分标准字段
 class Assignment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -201,59 +192,7 @@ def to_dict_list(self):
         'is_system': True if not self.teacher_id else False # 增加一个标识位
     }
 
-
-# backend/models.py
-# from exts import db
 from datetime import datetime
-
-
-# 这里是之前其他的模型 (User, Course 等)，保持不变...
-
-class RolePrompt(db.Model):
-    __tablename__ = 'role_prompts'
-
-    id = db.Column(db.Integer, primary_key=True)
-    role_name = db.Column(db.String(64), nullable=False)
-    teacher_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)  # 系统角色此项为 Null
-    category = db.Column(db.String(32))
-    description = db.Column(db.Text)
-    short_intro = db.Column(db.String(255))
-    prompt_template = db.Column(db.Text, nullable=False)
-    skills = db.Column(db.JSON)
-    use_count = db.Column(db.Integer, default=0)
-    status = db.Column(db.String(10), default='active')
-    created_at = db.Column(db.DateTime, default=datetime.now)
-
-    # 关联教师模型 (确保 User 模型已定义)
-    teacher = db.relationship('User', backref='created_prompts')
-
-    def to_dict_list(self):
-        """专门给列表页（广场/表格）使用的格式化方法"""
-        return {
-            'id': self.id,
-            'role_name': self.role_name,
-            'content': self.short_intro or (self.prompt_template[:50] + "..."),
-            'teacher_name': self.teacher.username if self.teacher else "系统内置",
-            'importance': 5 if not self.teacher_id else 4,
-            'status': self.status,
-            'category_name': self.category,
-            'is_system': True if not self.teacher_id else False
-        }
-
-    def to_dict(self):
-        """给卡片详情或对话页使用的格式化方法"""
-        return {
-            'id': self.id,
-            'name': self.role_name,
-            'teacher': self.teacher.username if self.teacher else "系统推荐",
-            'category': self.category,
-            'description': self.description,
-            'shortIntro': self.short_intro,
-            'skills': self.skills or [],
-            'useCount': self.use_count,
-            'tagType': 'success' if not self.teacher_id else 'info'
-        }
-
 class RoleCallLog(db.Model):
     __tablename__ = 'role_call_log'
     id = db.Column(db.Integer, primary_key=True)
